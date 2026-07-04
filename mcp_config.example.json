@@ -1,0 +1,15 @@
+{
+    "mcpServers": {
+        "cb-analyzer": {
+            "command": "python",
+            "args": ["D:/python/PandaAI/Pandaai_skill_03/mcp_server.py"],
+            "env": {
+                "PANDADATA_USERNAME": "your-username",
+                "PANDADATA_PASSWORD": "your-password",
+                "ANTHROPIC_AUTH_TOKEN": "your-api-key",
+                "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+                "ANTHROPIC_MODEL": "claude-sonnet-4-20250514"
+            }
+        }
+    }
+}

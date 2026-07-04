@@ -1,0 +1,19 @@
+# Credentials
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+
+# Data & cache
+cache/
+data/
+output/
+
+# Debug files
+_debug_cols.txt
+_ths_cols.txt

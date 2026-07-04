@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skill-cb-analyzer"
+version = "1.2.0"
+description = "A-share convertible bond daily analyzer: double-low strategy + clause-driven + stock linkage + risk monitor"
+requires-python = ">=3.10"
+license = {text = "GPLv3"}
+authors = [
+    {name = "Tao"}
+]
+dependencies = [
+    "panda_data>=0.0.9",
+    "pandas>=2.0.0",
+    "numpy>=1.22,<2.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "anthropic>=0.39.0",
+    "akshare>=1.18.0",
+    "requests>=2.31.0",
+    "urllib3>=2.0.0",
+    "tenacity>=8.0",
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+cb-analyzer = "run:main"
+cb-mcp = "mcp_server:main"
+
+[tool.setuptools.packages.find]
+include = ["core*", "llm*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

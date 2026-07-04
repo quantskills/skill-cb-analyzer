@@ -1,0 +1,104 @@
+{
+  "pandadata": {
+    "base_url": "http://pandadata.pandaaiquant.com",
+    "username": "",
+    "password": ""
+  },
+  "scan": {
+    "lookback_days": 120
+  },
+  "valuation": {
+    "double_low_price_max": 120,
+    "double_low_premium_max": 20,
+    "ytm_threshold": 3.0,
+    "ytm_treasury_spread": 2.0,
+    "bond_floor_ratio": 1.05,
+    "premium_percentile_window": 60,
+    "treasury_1y": 1.5,
+    "treasury_3y": 2.2
+  },
+  "clause": {
+    "redemption_warn_ratio": 1.20,
+    "redemption_danger_ratio": 1.28,
+    "redemption_consecutive_days": 15,
+    "redemption_total_days": 30,
+    "downward_revision_prob_threshold": 0.4,
+    "putback_consecutive_days": 30,
+    "maturity_warn_days": 365
+  },
+  "stock_linkage": {
+    "momentum_lookback": 20,
+    "momentum_bullish_threshold": 3.0,
+    "momentum_bearish_threshold": -3.0,
+    "deviation_threshold": 3.0,
+    "delta_high_threshold": 0.8
+  },
+  "options": {
+    "risk_free_rate": 0.025,
+    "hv_window": 60,
+    "iv_percentile_window": 252,
+    "iv_low_percentile": 25,
+    "iv_high_percentile": 75,
+    "hv_iv_divergence_threshold": 0.10,
+    "vol_expansion_lookback": 20,
+    "bs_delta_high": 0.70,
+    "bs_delta_low": 0.30
+  },
+  "risk": {
+    "min_daily_turnover": 100,
+    "credit_exclude_st": true,
+    "credit_exclude_rated_below": "A",
+    "redemption_announced_exclude": true
+  },
+  "scoring": {
+    "valuation_weight": 0.40,
+    "clause_weight": 0.30,
+    "linkage_weight": 0.20,
+    "structure_weight": 0.10,
+    "credit_penalty": -20,
+    "liquidity_penalty": -10,
+    "industry_neutralize": false
+  },
+  "detector_weights": {
+    "double_low": 4,
+    "ytm_defense": 3,
+    "bond_floor": 3,
+    "premium_percentile": 2,
+    "redemption_progress": 4,
+    "downward_revision": 3,
+    "putback_progress": 2,
+    "maturity_alert": 1,
+    "stock_momentum": 3,
+    "cb_stock_deviation": 2,
+    "delta_elasticity": 2,
+    "stock_pattern": 1,
+    "volume_active": 2,
+    "balance_trend": 1,
+    "iv_percentile": 2,
+    "hv_iv_divergence": 2,
+    "vol_expansion": 2,
+    "bs_delta": 2
+  },
+  "llm": {
+    "provider": "anthropic",
+    "model": "deepseek-v4-pro",
+    "max_tokens": 2048,
+    "timeout": 120.0,
+    "max_retries": 2,
+    "llm_retries": 3,
+    "top_n": 5
+  },
+  "output": {
+    "dir": "output"
+  },
+  "backtest": {
+    "forward_days": 5,
+    "n_quintiles": 5,
+    "min_periods": 2,
+    "ic_horizons": [1, 3, 5, 10, 20]
+  },
+  "factor_analysis": {
+    "enabled": false,
+    "min_dates": 10
+  }
+}

@@ -3,7 +3,7 @@
 Data sources:
   - CB quotes (primary): AKShare ``bond_cb_jsl`` — 集思录可转债实时行情
   - CB daily history:    AKShare ``bond_cb_daily`` — 转债日线
-  - Stock K-line:        Pandadata ``get_stock_daily`` — 正股K线
+  - Stock K-line:        Pandadata ``get_stock_daily_post`` — 正股K线（后复权）
   - Stock info:          Pandadata ``get_stock_detail`` — 正股基本信息
   - Trading calendar:    Pandadata ``get_trade_cal`` / ``get_last_trade_date``
 """
@@ -102,7 +102,7 @@ class DataFetcher:
         password = os.getenv("DEFAULT_PASSWORD") or pd_cfg.get("password", "")
         base_url = pd_cfg.get("base_url", "http://pandadata.pandaaiquant.com")
 
-        if username and not username.startswith("86"):
+        if username and not username.startswith("86") and not username.startswith("086"):
             username = "86" + username
             logger.info("Auto-added 86 prefix: %s", username)
 
@@ -148,6 +148,72 @@ class DataFetcher:
         if len(dates) >= offset:
             return dates[offset - 1]
         return date_str
+
+    # -- Index data ---------------------------------------------------
+
+    def fetch_index_daily(
+        self,
+        index_code: str = "000832",
+        start_date: str = "20000101",
+        end_date: str | None = None,
+    ) -> pd.DataFrame:
+        """Fetch daily OHLC for an index (default: 中证转债指数 000832).
+
+        Uses Pandadata index daily API. Falls back to stock daily interface.
+        Caches result as ``cache/index_<code>.parquet``.
+
+        Returns:
+            DataFrame with [trade_date, close] or empty on failure.
+        """
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y%m%d")
+
+        logger.info("Fetching index daily: %s (%s ~ %s)", index_code, start_date, end_date)
+        try:
+            raw = _retry_api_call(
+                lambda: pdd.get_index_daily(
+                    symbol=index_code, start_date=start_date, end_date=end_date,
+                ),
+                desc=f"index daily {index_code}",
+            )
+        except Exception:
+            logger.warning("get_index_daily failed, trying stock daily fallback")
+            try:
+                raw = _retry_api_call(
+                    lambda: pdd.get_stock_daily(
+                        symbol=[index_code], start_date=start_date, end_date=end_date,
+                    ),
+                    desc=f"index daily fallback {index_code}",
+                )
+            except Exception as e:
+                logger.warning("Index fetch failed: %s", e)
+                return pd.DataFrame(columns=["trade_date", "close"])
+
+        if raw is None or raw.empty:
+            return pd.DataFrame(columns=["trade_date", "close"])
+
+        df = raw.copy()
+        date_col = next((c for c in ["date", "trade_date"] if c in df.columns), None)
+        close_col = next((c for c in ["close"] if c in df.columns), None)
+        if date_col and close_col:
+            df = df[[date_col, close_col]].copy()
+            df.rename(columns={date_col: "trade_date", close_col: "close"}, inplace=True)
+            df["trade_date"] = df["trade_date"].astype(str)
+            df["close"] = pd.to_numeric(df["close"], errors="coerce")
+            df = df.dropna(subset=["close"])
+            df.sort_values("trade_date", inplace=True)
+
+        # Cache to parquet
+        try:
+            cache_dir = Path("cache")
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_path = cache_dir / f"index_{index_code}.parquet"
+            df.to_parquet(cache_path, index=False)
+            logger.info("Index cache saved: %s (%d rows)", cache_path, len(df))
+        except Exception as e:
+            logger.warning("Index cache save failed: %s", e)
+
+        return df
 
     # -- CB data: 东方财富 (primary) + 同花顺 (supplement) ------------
 
@@ -200,7 +266,7 @@ class DataFetcher:
                 raw.attrs["source"] = "akshare_jisilu"
                 return raw
         except Exception:
-            pass
+            logger.debug("bond_cb_jsl failed, trying next fallback", exc_info=True)
 
         logger.info("Trying bond_cb_daily fallback ...")
         try:
@@ -317,7 +383,7 @@ class DataFetcher:
         def _fetch_chunk(chunk_symbols: list[str], chunk_idx: int) -> pd.DataFrame:
             try:
                 df = _retry_api_call(
-                    pdd.get_stock_daily,
+                    pdd.get_stock_daily_post,  # 后复权：分红/送股/配股不产生价格跳空
                     symbol=chunk_symbols,
                     start_date=start_date,
                     end_date=end_date,

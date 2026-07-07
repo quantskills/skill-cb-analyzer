@@ -443,7 +443,7 @@ def compute_cb_metrics(
             if not pd.isna(sp):
                 return float(sp)
             # Try with exchange suffix
-            for sfx in (".SH", ".SZ"):
+            for sfx in (".SH", ".SZ", ".BJ"):
                 sp = stock_close_map.get(sc + sfx, float("nan"))
                 if not pd.isna(sp):
                     return float(sp)
@@ -479,9 +479,9 @@ def compute_cb_metrics(
         ratios = []
         putback_ratios = []
         for idx, row in df.iterrows():
-            cp = float(row.get("conversion_price", 0))
-            if not cp or cp != cp:  # 0 or NaN → fallback 1.0
-                cp = 1.0
+            cp = safe_float(row.get("conversion_price", 0), 0.0)
+            if cp <= 0 or pd.isna(row.get("conversion_price", 0)):
+                cp = float("nan")
             sc = str(row.get("stock_code", ""))
             sp = _get_stock_price(idx, sc)
             sp = sp if not pd.isna(sp) else 0.0

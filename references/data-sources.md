@@ -17,7 +17,7 @@ AKShare bond_cb_stock_map ──映射──▶ 转债↔正股代码对应
 
 ### 正股K线
 ```
-Pandadata get_stock_daily (主) ──fail──▶ 跳过（无法继续）
+Pandadata get_stock_daily_post (主, 后复权) ──fail──▶ 跳过（无法继续）
 ```
 
 ### 正股信息
@@ -62,9 +62,9 @@ Pandadata get_stock_detail (主) ──fail──▶ 使用空信息（降级继
 
 ## Pandadata 接口说明
 
-### get_stock_daily
+### get_stock_daily_post
 
-获取正股日K线数据：
+获取正股日K线数据（**后复权**，消除分红、送股、配股带来的价格跳空）：
 - 分块拉取（200只/块）
 - 线程池并发（最大4线程）
 - 含重试+指数退避（最多3次）
@@ -84,7 +84,7 @@ Pandadata get_stock_detail (主) ──fail──▶ 使用空信息（降级继
 cache/
   YYYYMMDD/
     cb_quote.parquet    # 转债行情（列名已英文化）
-    stock_kline.parquet # 正股K线
+    stock_kline.parquet # 正股K线（后复权）
     stock_info.parquet  # 正股信息
     .cache_meta.json    # 缓存元信息
 ```
@@ -129,7 +129,7 @@ HistoryStore 为以下检测器提供历史数据：
 | 转债行情 | AKShare 集思录 | bond_cb_daily | 报告标注数据缺失 |
 | 到期日/规模 | 集思录 | 同花顺 bond_zh_cov_info_ths | 使用默认值 |
 | 成交量/额 | 集思录 | 同花顺 bond_zh_hs_cov_spot | 成交量/额显示为 0 |
-| 正股K线 | Pandadata | — | 跳过正股联动信号 |
+| 正股K线 | Pandadata (后复权) | — | 跳过正股联动信号 |
 | 正股信息 | Pandadata | — | 行业显示"未知"，跳过ST检测 |
 | LLM分析 | AnthropicBackend | 规则引擎备选 | 输出基于规则的分析 |
 | 历史数据 | cb_history.parquet | — | 首次运行时历史为空，分位/连续日不可用 |

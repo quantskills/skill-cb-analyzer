@@ -24,6 +24,7 @@ from core._types import SignalResult
 from core.cache import CacheManager
 from core.data_fetcher import DataFetcher, _load_config
 from core.bond_calculator import compute_cb_metrics
+from core.data_quality import validate_cb_data
 from core.history_store import HistoryStore
 from core.valuation import ValuationDetector
 from core.clause_monitor import ClauseMonitor
@@ -63,6 +64,13 @@ class CBPipeline:
         self._linkage = StockLinkageDetector(self._config)
         self._volatility = VolatilityDetector(self._config)
         self._risk = RiskFilter(self._config)
+
+        # Config validation (non-blocking)
+        from core.config_validator import validate_config
+        _cfg_warnings = validate_config(self._config)
+        if _cfg_warnings:
+            for w in _cfg_warnings:
+                logger.warning("Config: %s", w)
 
         # Scoring
         self._scorer = Scorer(self._config)
@@ -143,6 +151,11 @@ class CBPipeline:
         logger.info("Computing CB metrics ...")
         cb_df = compute_cb_metrics(cb_df, stock_kline, trade_date)
 
+        # 3a. Data quality validation (non-blocking)
+        cb_df, quality_warnings = validate_cb_data(cb_df)
+        if quality_warnings:
+            errors.extend(quality_warnings)
+
         # 3b. Save current snapshot to history (for future A4/D2 use)
         try:
             self._history.save_snapshot(trade_date, cb_df)
@@ -206,7 +219,7 @@ class CBPipeline:
             if self._risk.is_redemption_announced(row):
                 excluded = True
                 exclude_reason = "已公告强赎，面临赎回风险"
-            elif self._risk._exclude_st:
+            elif self._risk.exclude_st:
                 # Use pre-computed credit_risk result from struct_results (BUG-2 fix)
                 credit_signal = struct_results["credit_risk"][idx]
                 if credit_signal.triggered:

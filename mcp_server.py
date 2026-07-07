@@ -141,10 +141,7 @@ def run_cb_analyzer(
             ]
 
             analyses = analyst.analyze_batch(bonds_data)
-            response["llm_analyses"] = {
-                s.get("code", "?"): analysis
-                for s, analysis in zip(top_bonds, analyses.values())
-            }
+            response["llm_analyses"] = analyses
 
             # Re-generate reports with LLM analyses embedded
             md_path, json_path = pipeline.regenerate_report(

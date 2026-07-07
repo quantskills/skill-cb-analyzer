@@ -269,7 +269,7 @@ class Reporter:
                         delta.triggered or (bs_d is not None and bs_d.triggered)
                     )
                     # cb_stock_deviation triggered (bullish lag)
-                    condition2 = dev.triggered and "正向偏离" in str(dev.detail)
+                    condition2 = dev.triggered and dev.detail.get("signal") == "bullish_lag"
 
                     if condition1 or condition2:
                         name = row.get("bond_name", row.get("转债名称", ""))
@@ -525,26 +525,62 @@ class Reporter:
                         lines.append(f"| Q1-Q{n_q} 多空 | {spread:.2%} |")
                     lines.append("")
 
+                # -- Benchmark comparison --
+                bm_comp = getattr(bt, "benchmark_comparison", {}) or {}
+                if bm_comp and "error" not in bm_comp:
+                    lines.append("### 基准对比 (vs 中证转债指数 000832)")
+                    lines.append("")
+                    lines.append("| 指标 | 策略Q1 | 基准指数 | 超额 |")
+                    lines.append("|------|--------|----------|------|")
+                    s_cum = bm_comp.get("strategy_cumulative", 0)
+                    b_cum = bm_comp.get("benchmark_cumulative", 0)
+                    excess = bm_comp.get("excess_return", 0)
+                    lines.append(f"| 累计收益 | {s_cum:.2%} | {b_cum:.2%} | {excess:.2%} |")
+                    ir_val = bm_comp.get("information_ratio", 0)
+                    te_val = bm_comp.get("tracking_error", 0)
+                    wr_val = bm_comp.get("win_rate", 0)
+                    lines.append(f"| 信息比率 | — | — | {ir_val:.2f} |")
+                    lines.append(f"| 跟踪误差 | — | — | {te_val:.1%} |")
+                    lines.append(f"| 跑赢胜率 | — | — | {wr_val:.0%} |")
+                    lines.append(
+                        f"> 基于 {bm_comp.get('n_periods', 0)} 期重叠数据。"
+                        f"Q1代表最高分组合，基准为中证转债指数(000832)。"
+                    )
+                    lines.append("")
+                elif bm_comp and "error" in bm_comp:
+                    lines.append("### 基准对比 (vs 中证转债指数 000832)")
+                    lines.append("")
+                    lines.append(f"> 基准对比数据不足（{bm_comp.get('error', 'unknown')}），"
+                                 f"需积累更多历史数据后分析。")
+                    lines.append("")
+
                 # -- Factor attribution --
                 factor_attr = getattr(bt, "factor_attribution", {}) or {}
                 if factor_attr and "error" not in factor_attr:
                     premiums = factor_attr.get("factor_premiums", {})
                     t_stats = factor_attr.get("t_stats", {})
+                    nw_t_stats = factor_attr.get("nw_t_stats", {})
                     if premiums:
                         lines.append("### 因子收益归因 (Fama-MacBeth)")
                         lines.append("")
-                        lines.append(f"| 因子 | 风险溢价 | t统计量 | 显著性 |")
-                        lines.append(f"|------|----------|---------|--------|")
+                        if nw_t_stats:
+                            lines.append(f"| 因子 | 风险溢价 | t统计量 | NW-t | 显著性 |")
+                            lines.append(f"|------|----------|--------|------|--------|")
+                        else:
+                            lines.append(f"| 因子 | 风险溢价 | t统计量 | 显著性 |")
+                            lines.append(f"|------|----------|---------|--------|")
                         for f_name, premium in premiums.items():
                             if f_name == "intercept":
                                 continue
                             t_val = t_stats.get(f_name, 0)
+                            nw_val = nw_t_stats.get(f_name, t_val) if nw_t_stats else t_val
+                            # Use NW t-stat for significance marking when available
                             sig = ""
-                            if abs(t_val) >= 2.58:
+                            if abs(nw_val) >= 2.58:
                                 sig = "***"
-                            elif abs(t_val) >= 1.96:
+                            elif abs(nw_val) >= 1.96:
                                 sig = "**"
-                            elif abs(t_val) >= 1.64:
+                            elif abs(nw_val) >= 1.64:
                                 sig = "*"
                             label_map = {
                                 "valuation_score": "估值因子",
@@ -553,10 +589,15 @@ class Reporter:
                                 "structure_score": "结构因子",
                             }
                             label = label_map.get(f_name, f_name)
-                            lines.append(f"| {label} | {premium:.6f} | {t_val:.2f} | {sig} |")
+                            if nw_t_stats:
+                                lines.append(f"| {label} | {premium:.6f} | {t_val:.2f} | {nw_val:.2f} | {sig} |")
+                            else:
+                                lines.append(f"| {label} | {premium:.6f} | {t_val:.2f} | {sig} |")
+                        nw_note = " (Newey-West HAC)" if nw_t_stats else ""
                         lines.append(
                             f"> 基于 {factor_attr.get('n_dates', 0)} 个交易日的横截面回归。"
                             f"平均R²={factor_attr.get('r_squared_avg', 0):.4f}。"
+                            f"NW-t{nw_note}用于显著性标记。"
                             f"* p<0.1, ** p<0.05, *** p<0.01"
                         )
                         lines.append("")
@@ -565,6 +606,77 @@ class Reporter:
                     lines.append("")
                     lines.append(f"> 因子归因数据不足（{factor_attr.get('error', 'unknown')}），"
                                  f"需积累更多历史数据后分析。")
+                    lines.append("")
+
+                # -- Cost model note --
+                cost_model = getattr(bt, "cost_model", {}) or {}
+                if cost_model.get("enabled", False):
+                    lines.append(f"> **交易成本假设**: 印花税 {cost_model.get('stamp_duty', 0.0005):.2%}(卖出单边)"
+                                 f" + 佣金 {cost_model.get('commission', 0.0001):.2%}(双边)"
+                                 f" + 滑点 {cost_model.get('slippage', 0.0001):.2%}，"
+                                 f"合计约 {cost_model.get('round_trip_cost', 0.0009):.2%} round-trip。")
+                    if cost_model.get('min_daily_turnover', 0) > 0:
+                        lines.append(f"> 流动性过滤: 日成交额 >= {cost_model['min_daily_turnover']:.0f}万元"
+                                     f" | 涨跌停过滤: {'已启用' if cost_model.get('filter_limit_hit') else '未启用'}")
+                    lines.append("")
+
+                # -- Weight calibration --
+                weight_cal = getattr(bt, "weight_calibration", {}) or {}
+                if weight_cal and "error" not in weight_cal:
+                    lines.append("### 权重校准 (Grid Search)")
+                    lines.append("")
+                    opt_w = weight_cal.get("optimal_weights", {})
+                    lines.append("| 维度 | 原始权重 | 最优权重 |")
+                    lines.append("|------|----------|----------|")
+                    scoring_cfg = self._config.get("scoring", {})
+                    orig = {
+                        "valuation": scoring_cfg.get("valuation_weight", 0.40),
+                        "clause": scoring_cfg.get("clause_weight", 0.30),
+                        "linkage": scoring_cfg.get("linkage_weight", 0.20),
+                        "structure": scoring_cfg.get("structure_weight", 0.10),
+                    }
+                    for dim in ["valuation", "clause", "linkage", "structure"]:
+                        ow = opt_w.get(dim, orig.get(dim, 0))
+                        lines.append(f"| {dim} | {orig.get(dim, 0):.2f} | {ow:.4f} |")
+                    lines.append("")
+                    train_ic = weight_cal.get("train_ic", 0)
+                    valid_ic = weight_cal.get("valid_ic", 0)
+                    n_combos = weight_cal.get("total_combinations", 0)
+                    lines.append(f"| 指标 | 数值 |")
+                    lines.append(f"|------|------|")
+                    lines.append(f"| 训练集IC | {train_ic:.4f} |")
+                    lines.append(f"| 验证集IC | {valid_ic:.4f} |")
+                    lines.append(f"| 搜索组合数 | {n_combos} |")
+                    lines.append(
+                        f"> 在{n_combos}个权重组合中搜索，步长={self._config.get('backtest', {}).get('calibration', {}).get('dimension_step', 0.05)}。"
+                        f"训练集({weight_cal.get('train_dates', '?')}期) / 验证集({weight_cal.get('valid_dates', '?')}期)。"
+                    )
+                    lines.append("")
+                elif weight_cal and "error" in weight_cal:
+                    lines.append("### 权重校准 (Grid Search)")
+                    lines.append("")
+                    lines.append(f"> 权重校准失败：{weight_cal.get('error', 'unknown')}")
+                    lines.append("")
+
+                # -- Dynamic weights --
+                dyn_weights = getattr(bt, "dynamic_weights", {}) or {}
+                if dyn_weights and "error" not in dyn_weights:
+                    lines.append("### 动态IC权重调整")
+                    lines.append("")
+                    lines.append("| 信号 | 静态权重 | 动态权重 | 变化 |")
+                    lines.append("|------|----------|----------|------|")
+                    base_w = self._config.get("detector_weights", {})
+                    for key, dw in sorted(dyn_weights.items()):
+                        bw = base_w.get(key, 0)
+                        change = dw - bw
+                        sign = "+" if change > 0 else ""
+                        lines.append(f"| {key} | {bw:.2f} | {dw:.4f} | {sign}{change:.4f} |")
+                    lines.append("")
+                    dw_cfg = self._config.get("backtest", {}).get("dynamic_weights", {})
+                    lines.append(
+                        f"> 基于滚动IC（窗口={dw_cfg.get('rolling_window', 20)}期）调整信号权重。"
+                        f"IC ≤ {dw_cfg.get('floor_ic', 0)} 的信号被降权为零。"
+                    )
                     lines.append("")
 
                 if bt.summary:
@@ -610,7 +722,7 @@ class Reporter:
         lines.append("")
         lines.append("本报告仅供研究参考，**不构成任何投资建议**。可转债交易存在市场风险、信用风险和条款风险，投资者应独立判断并承担交易风险。过往表现不代表未来收益。")
         lines.append("")
-        lines.append(f"> Generated by skill-cb-analyzer v1.4.0 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        lines.append(f"> Generated by skill-cb-analyzer v1.6.0 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
         return "\n".join(lines)
 

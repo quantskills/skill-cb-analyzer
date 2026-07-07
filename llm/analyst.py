@@ -70,6 +70,9 @@ class AnthropicBackend:
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
+        # Warn if response was truncated due to max_tokens
+        if hasattr(resp, "stop_reason") and resp.stop_reason == "max_tokens":
+            logger.warning("LLM response truncated (max_tokens reached)")
         content = resp.content
         if isinstance(content, list):
             text_blocks = [b.text for b in content if hasattr(b, "text")]

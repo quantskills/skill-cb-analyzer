@@ -58,7 +58,10 @@ class CacheManager:
         cb_quote = _safe_read("cb_quote.parquet")
         stock_kline = _safe_read("stock_kline.parquet")
         stock_info = _safe_read("stock_info.parquet")
-        logger.info("Cache hit: %s (%d CB quotes)", trade_date, len(cb_quote))
+        if not cb_quote.empty:
+            logger.info("Cache hit: %s (%d CB quotes)", trade_date, len(cb_quote))
+        else:
+            logger.info("Cache miss: %s (no data found)", trade_date)
         return cb_quote, stock_kline, stock_info
 
     def load_meta(self, trade_date: str) -> dict:
@@ -69,7 +72,7 @@ class CacheManager:
             try:
                 return json.loads(meta_path.read_text(encoding="utf-8"))
             except Exception:
-                pass
+                logger.debug("Failed to read cache metadata %s", meta_path, exc_info=True)
         return {}
 
     def save(
@@ -88,7 +91,7 @@ class CacheManager:
             df = df.copy()
             for col in df.columns:
                 if df[col].dtype == object:
-                    mask = df[col].astype(str).str.lower().isin(["nan", "<na>"])
+                    mask = df[col].isna()
                     df.loc[mask, col] = None
             df.to_parquet(path, index=False)
 

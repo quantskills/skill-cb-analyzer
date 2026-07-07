@@ -5,7 +5,7 @@ description: A-share convertible bond daily comprehensive analyzer: double-low s
   historical/implied volatility, IC + stratified backtesting. 21 signal detectors,
   4-dimension weighted scoring, LLM per-bond analysis, Markdown + JSON dual-format
   daily report.
-version: 1.3.0
+version: 1.6.0
 category: quant-skills
 triggers:
   - 可转债
@@ -27,7 +27,7 @@ data_sources:
   - akshare bond_cb_stock_map (CB ↔ stock mapping)
   - akshare bond_zh_cov_info_ths (同花顺 — maturity dates, issue scale, coupon rates)
   - akshare bond_zh_hs_cov_spot (同花顺 — volume, amount)
-  - pandadata get_stock_daily (underlying stock K-line, configurable lookback)
+  - pandadata get_stock_daily_post (underlying stock K-line, 后复权, configurable lookback)
   - pandadata get_stock_detail (stock info: industry, list status)
   - scipy.stats (Black-Scholes norm.cdf/pdf, Spearman rank correlation)
   - deepseek/claude API (LLM per-bond analysis, pluggable backend)
@@ -39,7 +39,39 @@ mcp_tools:
 output_formats:
   - markdown日报 (11节)
   - json结构化数据
-schedule: 每日收盘后
+schedule: 每日收盘后 15:45 Asia/Shanghai（盘后固定价格交易 15:05-15:30 结束后执行）
+license: GPLv3
+metadata:
+  organization: QuantSkills
+  organization_url: https://github.com/quantskills
+  repository: skill-cb-analyzer
+  repository_url: https://github.com/quantskills/skill-cb-analyzer
+  project_type: skill
+  collection: cb-analyzer
+  creator: Tao
+quantSkills:
+  project_type: skill
+  category: analysis
+  tags:
+  - convertible-bond
+  - double-low
+  - black-scholes
+  - options-pricing
+  - volatility
+  - backtest
+  - pandadata
+  - akshare
+  platforms:
+  - claude-code
+  - codex
+  - hermes
+  - openclaw
+  - cursor
+  status: dev
+  validation_level: runnable
+  maintainer_type: community
+  summary_zh: A股可转债每日综合分析：双低策略+条款事件+正股联动+Black-Scholes期权定价（Delta/Gamma/Vega）+HV/IV+IC分层回测+退市追踪。21信号检测器，四维加权评分，LLM逐券分析，Markdown/JSON双格式日报。v1.7修复Delta双重计数，bs_delta改为Gamma质量信号。
+  summary_en: Daily A-share CB analyzer: double-low + clause events + stock linkage + Black-Scholes Greeks + HV/IV + IC backtest + delisting tracking. 21 detectors, 4-dim weighted scoring, LLM per-bond analysis. v1.7 fixes Delta double-counting.
 ---
 
 # 可转债每日分析 (skill-cb-analyzer)
@@ -140,9 +172,11 @@ cb-mcp
 | 检测器 | 权重 | 触发条件 | 说明 |
 |--------|:----:|----------|------|
 | IV分位 | 2 | 隐含波动率处于历史低/高分位 | IV 低分位=期权便宜(看涨)，IV 高分位=偏贵(看跌) |
-| 波动率背离 | 2 | IV − HV > 10% 或 HV − IV > 10% | IV >> HV 期权偏贵(看跌)，HV >> IV 期权便宜(看涨) |
+| 波动率背离 | 2 | IV − HV > 8% 或 HV − IV > 8% | **v1.7:** 阈值由 10%→8%，提升检测灵敏度，减少"大面积不触发"问题 |
 | 波动率扩张 | 2 | 当前 HV 较 20 日前 > +20% 或 < −20% | 波动率扩张=更多机会(看涨)，收缩=机会减少(看跌) |
-| Delta质量 | 2 | BS Delta > 0.70（高股性）或 < 0.30（偏债性） | BS Delta 始终 ∈ (0,1)，含 Gamma 辅助信息 |
+| Delta质量 | **1** | Gamma > 0.05（高敏感度，适合波段交易）| **v1.7 重要变更：** 此检测器不再输出 Delta 信号（消除与 C3 `Delta弹性` 的双重计数）。改为基于 BS Gamma 判断期权敏感度质量——高 Gamma 意味着 Delta 对正股价格变化更敏感，适合主动波段交易。BS Delta 仍在 `detail` 中提供作为参考。权重由 2→1。 |
+
+> **v1.7 Delta 双重计数修复：** 此前 `Delta弹性`（C3，权重2）和 `Delta质量`（波动率组，当时权重2）共享同一 BS Delta 值，合计 ~8% 综合权重存在系统性高估。v1.7 将 `Delta质量` 重构为 Gamma 质量信号（权重1），联动维度通过 `Delta弹性` 获取 Delta，波动率维度通过 `Delta质量` 获取 Gamma/Vega。Delta 相关综合权重由 ~8% 降至 ~6%（2+1=3/22 vs 2+2=4/22），消除了信息重叠。
 
 ### 市场结构与风险 (D组，权重 10%)
 
@@ -150,7 +184,7 @@ cb-mcp
 |--------|:----:|----------|------|
 | 成交量活跃 | 2 | 日成交额 > 5000万 | 流动性充足（amount 在数据获取层归一化为万元） |
 | 余额趋势 | 1 | 余额减少 > 5% | 转股推进（基于 HistoryStore 历史对比） |
-| 信用风险 | — | ST正股(含 *ST/PT/退市)/评级 < A/低价 | 惩罚项(−20)；检测 list_status 字段 |
+| 信用风险 | — | ST正股(含 *ST/PT/退市整理期)/评级 < A/低价 | **直接排除**（v1.7+）。2026-07-06 起主板 ST 涨跌幅由 ±5%→±10%，正股波动翻倍，转债信用风险显著放大，原有 -20 惩罚不足以反映风险。检测 `list_status` 字段，命中即排除 |
 | 强赎公告排除 | — | 已公告强赎 | 直接排除 |
 | 流动性风险 | — | 成交额 < 100万 | 惩罚项(−10) |
 
@@ -169,6 +203,12 @@ cb-mcp
 
 **关键假设：** 可转债期权价值 ≈ 转债价格 − 纯债价值。IV 通过将 BS 价格与期权价值匹配得到。
 
+> **模型风险提示：** Black-Scholes 模型假设欧式期权（仅到期日可行权），但 A 股可转债实质是**美式期权 + 发行人有条件赎回权 + 投资者回售权 + 转股价下修条款**的复合衍生品。以下场景中 BS Delta 可能系统性偏离真实风险暴露：
+> - **临近强赎触发（正股价/转股价 → 1.30）：** 发行人可能随时公告赎回，转债价格面临跳空下跌风险。BS Delta 忽略赎回条款，可能高估股性 0.05–0.15。
+> - **深度实值（正股价 >> 转股价）：** 转股价值主导，转债价格与正股几乎同步，BS Delta → 1.0。此区间 BS 近似合理。
+> - **深度虚值（正股价 << 转股价）：** 债底主导，期权价值极小，BS Delta → 0。此区间 BS 近似合理。
+> - **模型风险对评分的影响：** `Delta弹性`（C3，权重2）和 `Delta质量`（波动率组，权重2）合计占联动维度 20% 权重中的约 40%（~8% 的综合权重）。在绝大多数非强赎场景中 BS Delta 是可靠的；在强赎预警区间（B1 触发）建议结合条款信号综合判断，不过度依赖 Delta 信号。
+
 ## 回测框架
 
 通过 `core/backtester.py` 验证评分模型的历史有效性（`--backtest` 标志）：
@@ -178,9 +218,22 @@ cb-mcp
 | Rank IC | Spearman 秩相关系数（每日评分 vs N日远期收益） |
 | IC IR | 平均 IC / IC 标准差 |
 | IC 胜率 | IC > 0 的交易日占比 |
+| IC 衰减 | 多期限 IC 分析（1/3/5/10/20 日） |
 | 分层回测 | 按综合评分分 5 组，等权计算远期收益，累计收益曲线 |
+| Newey-West t 检验 | HAC 标准误修正自相关偏差（Bartlett 核，自动滞后选择） |
+| Fama-MacBeth | 因子风险溢价归因（四维评分） |
+| 权重校准 | 单纯形网格搜索最优维度权重 |
+| 动态权重 | 滚动 IC 调整检测器权重 |
+| 基准对比 | 中证转债指数（000832）超额收益 / IR / 跟踪误差 |
+| 成本模型 | 可配置印花税+佣金+滑点+涨跌停过滤 |
 
 回测基于 `output/` 目录中的历史 JSON 报告 + `cache/` 中的历史价格数据。数据不足时自动降级显示提示信息。随着每日运行自动积累历史。
+
+> **生存偏差提示：** 转债 universe 来自回测日期的集思录行情快照，已退市转债不纳入历史回测。可转债退市原因包括强赎、到期、正股退市等——其中强赎退市的转债通常表现优异（正股大涨触发强赎），排除它们会导致回测**低估**双低策略的实际收益。建议在长期回测中区分"自然退市"和"强赎退市"，对后者做显式处理。
+
+> **v1.7 退市追踪：** `core/backtester.py` 新增 `analyze_delisting_survivorship()` 函数，自动分类退市原因（强赎/到期/正股退市/其他），计算各原因的退市转债数量和平均收益，并量化生存偏差的方向和幅度。退市分析结果包含在 `BacktestResult.delisting_analysis` 中，并在回测摘要中显示。
+
+> **2026-07-06 新规后校准：** 主板 ST 涨跌幅 ±5%→±10% 生效后，ST 正股转债已被直接排除（v1.7+）。回测时需注意：2026-07-06 之前的历史数据中 ST 转债在 ±5% 制度下的表现 ≠ 当前制度下的风险。建议在新规后积累 ≥60 个交易日数据（预计 2026年10月），运行 `python run.py --backtest --regime-marker 2026-07-06` 生成制度分界线前后的 IC 对比报告。关注点：双低策略 IC 是否因 ST 排除而改善、正股联动信号的衰减程度。
 
 ## 评分模型
 
@@ -258,11 +311,11 @@ cb-mcp
 | 可转债行情 | AKShare bond_cb_jsl (集思录) | 价格/溢价率/转股价/强赎触发价/回售触发价 |
 | 转债期限+规模+票息 | AKShare bond_zh_cov_info_ths (同花顺) | 到期日、发行规模、票面利率（如API提供） |
 | 转债成交量 | AKShare bond_zh_hs_cov_spot (同花顺) | amount 元→万元归一化在 data_fetcher 层完成 |
-| 正股K线 | Pandadata get_stock_daily | ~500只正股，可通过 config 配置 lookback 天数 |
+| 正股K线 | Pandadata get_stock_daily_post (后复权) | ~500只正股，前复权导致的价格跳空被消除，可通过 config 配置 lookback 天数 |
 | 正股信息 | Pandadata get_stock_detail | 行业分类、list_status（ST检测） |
 | 期权定价 | scipy.stats | Black-Scholes norm.cdf/pdf，Spearman 秩相关 |
 | LLM分析 | DeepSeek / Claude API | 后端可插拔（LLMBackend Protocol），provider 可配置 |
-| 交易所映射 | exchange_utils | 600/601/688/689→SH, 000/002/300→SZ, 8xx→BJ |
+| 交易所映射 | exchange_utils | 600/601/602/603/605/688/689→SH, 000/001/002/003/300/301→SZ, 4xx/8xx→BJ |
 
 ## 配置参考 (config.json)
 
@@ -281,15 +334,12 @@ cb-mcp
     "bs_delta_high": 0.70,
     "bs_delta_low": 0.30
   },
-  "risk": { "min_daily_turnover": 100, "credit_exclude_st": true, ... },
+  "risk": { "min_daily_turnover": 100, "credit_exclude_list_status": ["ST", "*ST", "PT", "退市"], "credit_exclude_st": true, ... },
   "scoring": {
     "valuation_weight": 0.40, "clause_weight": 0.30,
     "linkage_weight": 0.20, "structure_weight": 0.10,
     "dimension_floor": 0.30,
-    "grades": [
-      {"threshold": 55, "grade": "A+", "label": "强烈关注"},
-      {"threshold": 45, "grade": "A", "label": "值得跟踪"}, ...
-    ]
+    "grades": [55, 45, 40, 37, 34, 30, 0]
   },
   "backtest": {
     "forward_days": 5,
@@ -312,12 +362,18 @@ cb-mcp
 | 约束 | 说明 |
 |------|------|
 | 强赎已公告排除 | 已发强赎公告的转债直接剔除 |
-| 信用风险惩罚 | ST/−15，评级过低/−20，流动性不足/−10；检测 list_status 字段 |
-| 交易所后缀映射 | 600/601/603/605/688/689→SH, 000/001/002/003/300/301→SZ, 4xx/8xx→BJ |
+| 信用风险排除 | **v1.7+：ST / \*ST / PT / 退市整理期直接排除**（不再使用惩罚分）。2026-07-06 起 ST 涨跌幅 ±5%→±10%，正股波动翻倍，转债信用风险显著放大。检测 `list_status` 字段 |
+| 交易所后缀映射 | 600/601/602/603/605/688/689→SH, 000/001/002/003/300/301→SZ, 4xx/8xx→BJ |
+| 后复权股价 | `get_stock_daily_post()` 消除分红送股带来的价格跳空 |
+| 数据质量校验 | 10 字段边界检查 + 信用评级 + 到期日格式，非阻塞告警 |
+| 配置校验 | 28 条规则，启动时非阻塞告警 |
 | BS Delta 替换 | Delta弹性使用真实 N(d1)，HV 不可用时回落 cv/cb_price |
 | 票息优先实际值 | API 提供票面利率时优先使用，否则回退评级分层估算 |
 | 不荐券 | 措辞为「值得关注」「可跟踪」，禁止「买入」「目标价」 |
 | 交易日智能跳过 | 节假日不跑空；is_trading_day() API故障默认False |
+| 盘后数据验证 | 2026-07-06 起盘后固定价格交易（15:05-15:30）扩容至全部 A 股。可转债行情（集思录/同花顺）的更新时间可能延迟至 15:45+。触发时间已调整为 15:45，首次运行后验证数据就绪时间 |
+| 数据新鲜度校验 | K 线数据最大日期 ≠ 目标日期 → 等待 60s 重试 × 3。转债行情（集思录）日期校验：若行情快照日期 < 目标日期 → 标记「数据延迟」。Pandadata `get_stock_daily_post` 拉取后验证每批数据均覆盖到目标日期 |
+| Runtime SLA | ~500 只转债 + 正股 K 线：预期 2–4 分钟（含 LLM 分析）。不含 LLM（`--no-llm`）：预期 1–2 分钟。>15 分钟 → WARNING。>30 分钟 → 超时退出 |
 | 数据容错 | 单只转债数据缺失跳过，不阻塞全流程 |
 | 评分可审计 | JSON输出包含评分子项 |
 | 列名规范化 | 中文列名在缓存前转为英文（`CB_COLUMN_MAP` 在 `_types.py` 中共享） |
@@ -328,7 +384,9 @@ cb-mcp
 | API 容错 | `init_api()` / `get_last_trade_date()` 异常捕获，pipeline 优雅降级 |
 | HistoryStore 缓存 | session 级缓存避免每只转债重复读取 parquet 文件 |
 | HistoryStore 完整性 | SHA-256 校验 + .bak 自动备份 + 原子写入（临时文件重命名） |
+| Newey-West 标准误 | Fama-MacBeth t 检验使用 HAC 标准误修正自相关 |
 | 回测数据不足降级 | 数据不足时显示提示信息，不阻塞报告生成 |
+| 0 静默异常 | 所有 `except Exception: pass` 替换为 `logger.debug(..., exc_info=True)` |
 
 ## 目录结构
 
@@ -346,7 +404,9 @@ skill-cb-analyzer/
 │   ├── _types.py               # 共享类型、CB_COLUMN_MAP、safe_float()
 │   ├── bond_calculator.py      # 可转债计算引擎 (含 rating-based coupon schedule)
 │   ├── data_fetcher.py         # 数据获取 (含列名规范化 CB_COLUMN_MAP、票息保留)
-│   ├── exchange_utils.py       # A股交易所后缀映射 (600→SH, 688→SH, 300→SZ, 8xx→BJ)
+│   ├── exchange_utils.py       # A股交易所后缀映射 (600→SH, 688→SH, 300→SZ, 4xx/8xx→BJ)
+│   ├── config_validator.py     # 配置校验 (28条规则，非阻塞)
+│   ├── data_quality.py         # 数据质量校验 (10字段边界 + 评级 + 到期日)
 │   ├── cache.py                # 日期分区 Parquet 缓存 (含 is_stale 过期检测)
 │   ├── history_store.py        # 逐券时序存储 (A4分位/B1B3连续日/D2余额趋势 + 评分列)
 │   ├── valuation.py            # A组：估值信号 (4)
@@ -360,7 +420,7 @@ skill-cb-analyzer/
 │   └── reporter.py             # Markdown + JSON 报告 (11节)
 ├── llm/
 │   └── analyst.py              # LLM分析 (LLMBackend Protocol + AnthropicBackend + 规则备选)
-├── tests/                      # 测试用例 (161个)
+├── tests/                      # 测试用例 (375个)
 ├── data/                       # HistoryStore 持久化数据
 ├── references/                 # 参考文档
 ├── cache/                      # 数据缓存

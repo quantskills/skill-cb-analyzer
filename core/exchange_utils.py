@@ -37,7 +37,7 @@ def _build_map() -> None:
     for prefix in ("300", "301"):
         EXCHANGE_SUFFIX_MAP[prefix] = ".SZ"
     # Beijing Exchange (北交所) — 4xx 退市板 + 8xxxxx
-    for prefix in ("400", "420", "430", "8"):
+    for prefix in ("400", "420", "430", "4", "8"):
         EXCHANGE_SUFFIX_MAP[prefix] = ".BJ"
 
 
@@ -61,6 +61,9 @@ def resolve_exchange_suffix(stock_code: str) -> str:
     heuristic: codes starting with ``"6"`` → ``.SH``, everything else → ``.SZ``.
     """
     code = str(stock_code).strip().zfill(6)
+    # Guard against already-suffixed codes: return as-is if .SH/.SZ/.BJ present
+    if "." in code:
+        return code
 
     # Try 3-digit prefix match first (covers 600-605, 688-689, 000-003, 300-301, 400-430)
     prefix_3 = code[:3]

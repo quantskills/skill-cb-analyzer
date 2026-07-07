@@ -103,11 +103,22 @@ class Scorer:
         # Load grade thresholds from config if provided
         grades_cfg = sc.get("grades")
         if grades_cfg:
-            self.grades = sorted(
-                [(g["threshold"], g["grade"], g["label"]) for g in grades_cfg],
-                key=lambda x: x[0],
-                reverse=True,
-            )
+            if isinstance(grades_cfg[0], dict):
+                self.grades = sorted(
+                    [(g["threshold"], g["grade"], g["label"]) for g in grades_cfg],
+                    key=lambda x: x[0],
+                    reverse=True,
+                )
+            else:
+                # Flat list of ints — map to DEFAULT_GRADES labels by position
+                thresholds = sorted(grades_cfg, reverse=True)
+                default_labels = [(t, g, l) for t, g, l in self.DEFAULT_GRADES]
+                self.grades = [
+                    (thresholds[i], default_labels[i][1], default_labels[i][2])
+                    if i < len(default_labels)
+                    else (thresholds[i], "D", "偏弱")
+                    for i in range(len(thresholds))
+                ]
         else:
             self.grades = list(self.DEFAULT_GRADES)
 
@@ -126,6 +137,7 @@ class Scorer:
         struct_composite: float,
         triggered: list[str],
         risk_flags: list[str],
+        dimension_weights: dict[str, float] | None = None,
     ) -> ScoreResult:
         """Compute final score for a single CB.
 
@@ -143,6 +155,9 @@ class Scorer:
             struct_composite: Structure composite 0–1.
             triggered: List of triggered signal names.
             risk_flags: List of risk flag descriptions.
+            dimension_weights: Optional override for dimension weights
+                               (e.g. from calibration). Keys: valuation,
+                               clause, linkage, structure.
 
         Returns:
             ScoreResult with full breakdown.
@@ -153,11 +168,21 @@ class Scorer:
         _link = max(link_composite, self._dimension_floor)
         _struct = max(struct_composite, self._dimension_floor)
 
+        w_val = self._w_val
+        w_clause = self._w_clause
+        w_link = self._w_link
+        w_struct = self._w_struct
+        if dimension_weights:
+            w_val = float(dimension_weights.get("valuation", w_val))
+            w_clause = float(dimension_weights.get("clause", w_clause))
+            w_link = float(dimension_weights.get("linkage", w_link))
+            w_struct = float(dimension_weights.get("structure", w_struct))
+
         base = (
-            self._w_val * _val +
-            self._w_clause * _clause +
-            self._w_link * _link +
-            self._w_struct * _struct
+            w_val * _val +
+            w_clause * _clause +
+            w_link * _link +
+            w_struct * _struct
         )
 
         # Convert 0-1 → 0-100

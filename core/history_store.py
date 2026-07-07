@@ -35,6 +35,16 @@ HISTORY_COLUMNS = [
     "outstanding_balance", "redemption_ratio", "putback_ratio",
 ]
 
+SIGNAL_COLUMNS = [
+    "sig_double_low", "sig_ytm_defense", "sig_bond_floor", "sig_premium_percentile",
+    "sig_redemption", "sig_downward_revision", "sig_putback", "sig_maturity",
+    "sig_stock_momentum", "sig_cb_stock_deviation", "sig_delta", "sig_stock_pattern",
+    "sig_iv_percentile", "sig_hv_iv_divergence", "sig_vol_expansion", "sig_bs_delta",
+    "sig_volume", "sig_balance_trend",
+]
+
+ALL_COLUMNS = HISTORY_COLUMNS + SIGNAL_COLUMNS
+
 
 class HistoryStore:
     """Persistent per-bond time-series store for detector history."""
@@ -60,23 +70,24 @@ class HistoryStore:
         if use_cache and self._cache is not None:
             return self._cache.copy()
         if not self._file.exists():
-            self._cache = pd.DataFrame(columns=HISTORY_COLUMNS)
+            self._cache = pd.DataFrame(columns=ALL_COLUMNS)
             return self._cache.copy()
         try:
             df = pd.read_parquet(self._file)
             # Backward compat: ensure all expected columns exist
-            for col in HISTORY_COLUMNS:
+            for col in ALL_COLUMNS:
                 if col not in df.columns:
                     df[col] = None
             self._cache = df
             return df.copy()
         except Exception:
             logger.warning("Corrupt history file, starting fresh")
-            self._cache = pd.DataFrame(columns=HISTORY_COLUMNS)
+            self._cache = pd.DataFrame(columns=ALL_COLUMNS)
             return self._cache.copy()
 
     def save_snapshot(self, trade_date: str, cb_df: pd.DataFrame,
-                       score_results: list | None = None) -> None:
+                       score_results: list | None = None,
+                       signal_strengths: dict[str, dict[str, float]] | None = None) -> None:
         """Append current date's per-bond metrics to history.
 
         Deduplicates: if trade_date already exists, removes old rows first.
@@ -88,6 +99,8 @@ class HistoryStore:
                    and optionally outstanding_balance.
             score_results: Optional list of ScoreResult objects; if provided,
                            score columns are merged into stored rows.
+            signal_strengths: Optional dict of bond_code → {sig_key: strength}
+                              for per-signal strength persistence.
         """
         if "bond_code" not in cb_df.columns:
             logger.warning("Cannot save history: cb_df missing bond_code column")
@@ -131,6 +144,12 @@ class HistoryStore:
             # Merge score data if available
             if bond in score_lookup:
                 row_data.update(score_lookup[bond])
+            # Merge signal strengths if available
+            if signal_strengths and bond in signal_strengths:
+                for sig_key, sig_val in signal_strengths[bond].items():
+                    col_name = f"sig_{sig_key}"
+                    if col_name in SIGNAL_COLUMNS or col_name.startswith("sig_"):
+                        row_data[col_name] = sig_val
             rows.append(row_data)
 
         if not rows:
@@ -144,13 +163,14 @@ class HistoryStore:
         combined = pd.concat([existing, new_df], ignore_index=True)
 
         # Ensure expected columns exist (backward compat with old files)
-        for col in HISTORY_COLUMNS:
+        for col in ALL_COLUMNS:
             if col not in combined.columns:
                 combined[col] = None
 
         self._dir.mkdir(parents=True, exist_ok=True)
 
         # Atomic write: temp file first, then rename
+        tmp_path = ""
         try:
             fd, tmp_path = tempfile.mkstemp(
                 suffix=".parquet", prefix="cb_hist_", dir=str(self._dir),
@@ -165,11 +185,12 @@ class HistoryStore:
             os.replace(tmp_path, self._file)
         except Exception:
             # Clean up temp file on failure
-            try:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-            except Exception:
-                pass
+            if tmp_path:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                except Exception:
+                    pass
             raise
 
         self._cache = None  # Invalidate cache after write
@@ -189,7 +210,7 @@ class HistoryStore:
             return True, "No history file yet"
         try:
             df = pd.read_parquet(self._file)
-            for col in HISTORY_COLUMNS:
+            for col in ALL_COLUMNS:
                 if col not in df.columns:
                     return False, f"Missing column: {col}"
             # Sanity checks
@@ -215,7 +236,7 @@ class HistoryStore:
             return True
         except Exception:
             logger.warning("History file corrupt; backup created, starting fresh")
-            self._cache = pd.DataFrame(columns=HISTORY_COLUMNS)
+            self._cache = pd.DataFrame(columns=ALL_COLUMNS)
             return False
 
     def get_premium_history(self, bond_code: str,

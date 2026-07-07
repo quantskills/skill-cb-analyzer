@@ -73,6 +73,14 @@ Examples:
 
     pipeline = CBPipeline()
 
+    # Config validation (non-blocking)
+    from core.config_validator import validate_config
+    config_warnings = validate_config(pipeline._config)
+    if config_warnings:
+        logger.warning("配置校验发现问题：")
+        for w in config_warnings:
+            logger.warning("  - %s", w)
+
     # --cleanup-cache mode
     if args.cleanup_cache is not None:
         removed = pipeline.cleanup_cache(keep_days=args.cleanup_cache)

@@ -13,7 +13,8 @@ from typing import Optional
 
 import pandas as pd
 
-from core._types import SignalResult, bullish_signal, neutral_signal, safe_float
+from core._types import (SignalResult, bearish_signal, bullish_signal,
+                          neutral_signal, safe_float)
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +133,12 @@ class ValuationDetector:
         ratio = cb_price / floor
 
         if ratio < self._floor_ratio:
-            # Closer to 1.0 = stronger signal
-            strength = 1.0 - (ratio - 1.0) / (self._floor_ratio - 1.0)
+            # Guard: if floor_ratio is 1.0 (degenerate), clamp to avoid div-by-zero
+            denom = self._floor_ratio - 1.0
+            if denom <= 0:
+                strength = 1.0
+            else:
+                strength = 1.0 - (ratio - 1.0) / denom
             strength = max(0.0, min(1.0, strength))
             return bullish_signal(
                 "bond_floor", "纯债保护信号",
@@ -198,7 +203,6 @@ class ValuationDetector:
             )
 
         if percentile > 80:
-            from core._types import bearish_signal
             return bearish_signal(
                 "premium_percentile", "溢价率分位信号",
                 strength=(percentile - 80) / 20.0,
@@ -253,18 +257,35 @@ class ValuationDetector:
 
         return results
 
-    def composite_score(self, signals: dict[str, SignalResult]) -> float:
+    def composite_score(
+        self, signals: dict[str, SignalResult],
+        weight_overrides: dict[str, float] | None = None,
+    ) -> float:
         """Compute weighted composite score for valuation group.
 
         Includes bearish signals (e.g. premium_percentile above 80th
         percentile) as negative contributions.  Result is clamped to [0, 1].
+
+        Args:
+            signals: Dict of signal_name → SignalResult.
+            weight_overrides: Optional per-call weight overrides for dynamic
+                              IC weighting (keys: double_low, ytm_defense,
+                              bond_floor, premium_percentile).
         """
-        weights = {
-            "double_low": self._w_double_low,
-            "ytm_defense": self._w_ytm,
-            "bond_floor": self._w_floor,
-            "premium_percentile": self._w_percentile,
-        }
+        if weight_overrides:
+            weights = {
+                "double_low": float(weight_overrides.get("double_low", self._w_double_low)),
+                "ytm_defense": float(weight_overrides.get("ytm_defense", self._w_ytm)),
+                "bond_floor": float(weight_overrides.get("bond_floor", self._w_floor)),
+                "premium_percentile": float(weight_overrides.get("premium_percentile", self._w_percentile)),
+            }
+        else:
+            weights = {
+                "double_low": self._w_double_low,
+                "ytm_defense": self._w_ytm,
+                "bond_floor": self._w_floor,
+                "premium_percentile": self._w_percentile,
+            }
 
         total_weight = sum(weights.values())
         if total_weight == 0:

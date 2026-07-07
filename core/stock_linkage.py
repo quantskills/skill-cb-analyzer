@@ -228,7 +228,7 @@ class StockLinkageDetector:
                                     "hv": round(hv, 4)},
                         )
             except Exception:
-                pass  # Fall back to simplified delta below
+                logger.debug("BS delta computation failed for %s, falling back to simplified", stock_code)
 
         # Simplified fallback
         delta_approx = cv / cb_price
@@ -382,23 +382,44 @@ class StockLinkageDetector:
 
         return results
 
-    def composite_score(self, signals: dict[str, SignalResult]) -> float:
+    def composite_score(
+        self, signals: dict[str, SignalResult],
+        weight_overrides: dict[str, float] | None = None,
+    ) -> float:
         """Compute weighted composite score for stock linkage + volatility group.
 
         Only counts weights for signals actually present in the dict, so the
         score is backward-compatible when volatility signals are absent.
+
+        Args:
+            signals: Dict of signal_name → SignalResult.
+            weight_overrides: Optional per-call weight overrides for dynamic
+                              IC weighting (config-level keys, e.g.
+                              stock_momentum, delta_elasticity, iv_percentile).
         """
-        weights = {
-            "stock_momentum": self._w_momentum,
-            "cb_stock_deviation": self._w_deviation,
-            "delta": self._w_delta,
-            "stock_pattern": self._w_pattern,
-            # Volatility signals (from VolatilityDetector) — same weight system
-            "iv_percentile": 2,
-            "hv_iv_divergence": 2,
-            "vol_expansion": 2,
-            "bs_delta": 2,
-        }
+        if weight_overrides:
+            weights = {
+                "stock_momentum": float(weight_overrides.get("stock_momentum", self._w_momentum)),
+                "cb_stock_deviation": float(weight_overrides.get("cb_stock_deviation", self._w_deviation)),
+                "delta": float(weight_overrides.get("delta_elasticity", self._w_delta)),
+                "stock_pattern": float(weight_overrides.get("stock_pattern", self._w_pattern)),
+                "iv_percentile": float(weight_overrides.get("iv_percentile", 2)),
+                "hv_iv_divergence": float(weight_overrides.get("hv_iv_divergence", 2)),
+                "vol_expansion": float(weight_overrides.get("vol_expansion", 2)),
+                "bs_delta": float(weight_overrides.get("bs_delta", 2)),
+            }
+        else:
+            weights = {
+                "stock_momentum": self._w_momentum,
+                "cb_stock_deviation": self._w_deviation,
+                "delta": self._w_delta,
+                "stock_pattern": self._w_pattern,
+                # Volatility signals (from VolatilityDetector) — same weight system
+                "iv_percentile": 2,
+                "hv_iv_divergence": 2,
+                "vol_expansion": 2,
+                "bs_delta": 1,             # v1.7: reduced from 2→1 (now Gamma-quality, not Delta duplicate)
+            }
 
         # Only count weights for keys that are present in the signals dict
         present_weights = {k: w for k, w in weights.items() if k in signals}

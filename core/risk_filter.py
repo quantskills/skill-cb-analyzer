@@ -39,6 +39,11 @@ class RiskFilter:
         self._credit_penalty = float(scoring.get("credit_penalty", -20))
         self._liquidity_penalty = float(scoring.get("liquidity_penalty", -10))
 
+    @property
+    def exclude_st(self) -> bool:
+        """Whether ST/delisted stocks are excluded."""
+        return self._exclude_st
+
     # -- D1: Volume Activity (成交量活跃度) ---------------------------
 
     def detect_volume(self, row: pd.Series) -> SignalResult:
@@ -153,10 +158,10 @@ class RiskFilter:
                 name_col = "name" if "name" in stock_info.columns else None
                 status_col = "list_status" if "list_status" in stock_info.columns else None
                 if sym_col:
-                    # Normalize: strip .SH/.SZ suffix for matching (CB data may omit it)
-                    stock_code_clean = stock_code.replace(".SH", "").replace(".SZ", "")
+                    # Normalize: strip .SH/.SZ/.BJ suffix for matching (CB data may omit it)
+                    stock_code_clean = stock_code.replace(".SH", "").replace(".SZ", "").replace(".BJ", "")
                     si_syms = stock_info[sym_col].astype(str)
-                    si_clean = si_syms.str.replace(".SH", "", regex=False).str.replace(".SZ", "", regex=False)
+                    si_clean = si_syms.str.replace(".SH", "", regex=False).str.replace(".SZ", "", regex=False).str.replace(".BJ", "", regex=False)
                     matches = stock_info[si_clean == stock_code_clean]
                     if not matches.empty:
                         si_row = matches.iloc[0]
@@ -275,17 +280,31 @@ class RiskFilter:
 
         return results
 
-    def composite_score(self, signals: dict[str, SignalResult]) -> float:
+    def composite_score(
+        self, signals: dict[str, SignalResult],
+        weight_overrides: dict[str, float] | None = None,
+    ) -> float:
         """Compute composite for structure group.
 
         Includes bearish signals (e.g. low volume) as negative contributions.
         credit_risk and liquidity are handled separately via risk_penalty().
         Result is clamped to [0, 1].
+
+        Args:
+            signals: Dict of signal_name → SignalResult.
+            weight_overrides: Optional per-call weight overrides for dynamic
+                              IC weighting (keys: volume_active, balance_trend).
         """
-        weights = {
-            "volume": self._w_volume,
-            "balance_trend": self._w_balance,
-        }
+        if weight_overrides:
+            weights = {
+                "volume": float(weight_overrides.get("volume_active", self._w_volume)),
+                "balance_trend": float(weight_overrides.get("balance_trend", self._w_balance)),
+            }
+        else:
+            weights = {
+                "volume": self._w_volume,
+                "balance_trend": self._w_balance,
+            }
 
         total_weight = sum(weights.values())
         if total_weight == 0:

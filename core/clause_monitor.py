@@ -92,7 +92,11 @@ class ClauseMonitor:
             )
 
         if ratio >= self._redemption_warn:
-            progress = (ratio - self._redemption_warn) / (self._redemption_danger - self._redemption_warn)
+            denom = self._redemption_danger - self._redemption_warn
+            if denom <= 0:
+                progress = 1.0  # warn == danger → treat as danger level
+            else:
+                progress = (ratio - self._redemption_warn) / denom
             return bearish_signal(
                 "redemption", "强赎预警",
                 strength=0.3 + progress * 0.3,
@@ -372,19 +376,36 @@ class ClauseMonitor:
 
         return results
 
-    def composite_score(self, signals: dict[str, SignalResult]) -> float:
+    def composite_score(
+        self, signals: dict[str, SignalResult],
+        weight_overrides: dict[str, float] | None = None,
+    ) -> float:
         """Compute weighted composite score for clause group.
 
         Note: redemption is bearish (negative strength), downward revision and
         putback are bullish (positive strength). The composite accounts for
         the sign of each signal.
+
+        Args:
+            signals: Dict of signal_name → SignalResult.
+            weight_overrides: Optional per-call weight overrides for dynamic
+                              IC weighting (keys: redemption_progress,
+                              downward_revision, putback_progress, maturity_alert).
         """
-        weights = {
-            "redemption": self._w_redemption,
-            "downward_revision": self._w_downward,
-            "putback": self._w_putback,
-            "maturity": self._w_maturity,
-        }
+        if weight_overrides:
+            weights = {
+                "redemption": float(weight_overrides.get("redemption_progress", self._w_redemption)),
+                "downward_revision": float(weight_overrides.get("downward_revision", self._w_downward)),
+                "putback": float(weight_overrides.get("putback_progress", self._w_putback)),
+                "maturity": float(weight_overrides.get("maturity_alert", self._w_maturity)),
+            }
+        else:
+            weights = {
+                "redemption": self._w_redemption,
+                "downward_revision": self._w_downward,
+                "putback": self._w_putback,
+                "maturity": self._w_maturity,
+            }
 
         total_weight = 0.0
         weighted_sum = 0.0

@@ -188,8 +188,11 @@ def _resolve_stock_close(stock_code: str, stock_kline: pd.DataFrame) -> float:
     if date_col is None:
         return float("nan")
     code = str(stock_code).strip()
-    # Try bare code and with suffixes
-    for candidate in (code, code + ".SH", code + ".SZ", code + ".BJ"):
+    if code.endswith((".SH", ".SZ", ".BJ")):
+        candidates = (code,)
+    else:
+        candidates = (code, code + ".SH", code + ".SZ", code + ".BJ")
+    for candidate in candidates:
         subset = stock_kline[stock_kline["symbol"].astype(str) == candidate]
         if not subset.empty:
             latest = subset.sort_values(date_col).iloc[-1]
@@ -207,7 +210,11 @@ def compute_hv_for_bond(
     if date_col is None:
         return float("nan")
     code = str(stock_code).strip()
-    for candidate in (code, code + ".SH", code + ".SZ", code + ".BJ"):
+    if code.endswith((".SH", ".SZ", ".BJ")):
+        candidates = (code,)
+    else:
+        candidates = (code, code + ".SH", code + ".SZ", code + ".BJ")
+    for candidate in candidates:
         subset = stock_kline[stock_kline["symbol"].astype(str) == candidate].sort_values(date_col)
         if not subset.empty:
             return historical_volatility(subset["close"], window=window)
@@ -268,8 +275,11 @@ class VolatilityDetector:
 
         # Approximate option value = CB price - bond floor
         option_value = cb_p - bond_floor_val
-        S = cv * safe_float(row.get("conversion_price", 0), 1.0) / 100.0
         K = safe_float(row.get("conversion_price", 0), 0.0)
+        if K <= 0 or cv <= 0:
+            return neutral_signal(key, "IV分位",
+                                  summary="IV不可计算（缺少转股价/转股价值）")
+        S = cv * K / 100.0
 
         iv = implied_volatility(option_value, S, K, remaining, self._risk_free_rate)
 
@@ -318,9 +328,13 @@ class VolatilityDetector:
         cb_p = safe_float(row.get("cb_price", 0), 0.0)
         remaining = safe_float(row.get("remaining_years", 0), 0.0)
         bond_floor_val = safe_float(row.get("bond_floor_value", 100.0), 100.0)
-        option_value = cb_p - bond_floor_val
-        S = cv * safe_float(row.get("conversion_price", 0), 1.0) / 100.0
         K = safe_float(row.get("conversion_price", 0), 0.0)
+        if K <= 0 or cv <= 0:
+            return neutral_signal(key, "波动率背离",
+                                  summary=f"HV={hv*100:.1f}%，缺少转股价/转股价值，无法计算IV",
+                                  detail={"hv": round(hv, 4)})
+        option_value = cb_p - bond_floor_val
+        S = cv * K / 100.0
         iv = implied_volatility(option_value, S, K, remaining, self._risk_free_rate)
 
         if not np.isfinite(iv) or iv <= 0:
@@ -363,8 +377,12 @@ class VolatilityDetector:
             return neutral_signal(key, "波动率扩张", summary="K线无日期列")
 
         code = str(stock_code).strip()
+        if code.endswith((".SH", ".SZ", ".BJ")):
+            candidates = (code,)
+        else:
+            candidates = (code, code + ".SH", code + ".SZ", code + ".BJ")
         subset = pd.DataFrame()
-        for candidate in (code, code + ".SH", code + ".SZ", code + ".BJ"):
+        for candidate in candidates:
             sub = stock_kline[stock_kline["symbol"].astype(str) == candidate].sort_values(date_col)
             if not sub.empty:
                 subset = sub
@@ -407,60 +425,70 @@ class VolatilityDetector:
     def detect_bs_delta(
         self, row: pd.Series, stock_kline: pd.DataFrame,
     ) -> SignalResult:
-        """C3-replacement: True Black-Scholes delta.
+        """C3-replacement: Delta quality via Gamma (v1.7 — deduplicated).
 
-        Uses BS delta = N(d1) instead of the simplified cv/cb_price ratio.
-        Falls back to simplified delta when HV is unavailable.
+        **v1.7 change:** This detector now outputs a **Gamma-quality signal**
+        instead of duplicating the Delta signal from ``StockLinkageDetector``.
+        ``delta`` (C3, stock_linkage.py) is the canonical Delta source for
+        linkage dimension; ``bs_delta`` (this detector) assesses Gamma/Vega
+        to judge the *quality* of the Delta estimate:
+
+        - High Gamma (> 0.05): CB is near ATM, delta changes rapidly →
+          useful for active trading, strong signal quality.
+        - Low Gamma (< 0.01): CB is deep ITM/OTM, delta is stable →
+          less actionable for short-term trading.
+
+        BS Delta is still computed (for detail output) but the *signal*
+        is driven by Gamma magnitude.  This eliminates the double-counting
+        described in SKILL.md §波动率与期权.
         """
         key = "bs_delta"
         cv = safe_float(row.get("conversion_value", 0), 0.0)
         cb_p = safe_float(row.get("cb_price", 0), 0.0)
 
-        # Determine S (stock close) and K (conversion price)
         K = safe_float(row.get("conversion_price", 0), 0.0)
         if K <= 0 or cv <= 0:
             return neutral_signal(key, "Delta质量", summary="缺少转股价/转股价值数据")
 
-        # Infer S from cv = (100/K) * S  →  S = cv * K / 100
         S = cv * K / 100.0
-
         remaining = safe_float(row.get("remaining_years", 0), 0.0)
         stock_code = str(row.get("stock_code", ""))
 
-        # Compute HV for sigma
         sigma = compute_hv_for_bond(stock_code, stock_kline, window=self._hv_window)
         if not np.isfinite(sigma) or sigma <= 0:
-            # Fallback: simplified delta
             delta_approx = cv / cb_p if cb_p > 0 else 0.0
-            if delta_approx >= self._bs_delta_high:
-                return bullish_signal(key, "Delta质量", min((delta_approx - self._bs_delta_high) / 0.3, 1.0),
-                                      summary=f"近似Delta={delta_approx:.2f}(HV不可用)，高股性",
-                                      detail={"delta_approx": round(delta_approx, 4), "method": "simple"})
-            if delta_approx < self._bs_delta_low:
-                return neutral_signal(key, "Delta质量",
-                                      summary=f"近似Delta={delta_approx:.2f}(HV不可用)，偏债性",
-                                      detail={"delta_approx": round(delta_approx, 4), "method": "simple"})
             return neutral_signal(key, "Delta质量",
-                                  summary=f"近似Delta={delta_approx:.2f}(HV不可用)",
+                                  summary=f"近似Delta={delta_approx:.2f}(HV不可用)，Gamma不可估计",
                                   detail={"delta_approx": round(delta_approx, 4), "method": "simple"})
 
-        # BS delta
         T = max(remaining, 0.01)
         delta = bs_delta(S, K, T, self._risk_free_rate, sigma)
         gamma = bs_gamma(S, K, T, self._risk_free_rate, sigma)
+        vega = bs_vega(S, K, T, self._risk_free_rate, sigma)
         detail = {"delta": round(delta, 4), "gamma": round(gamma, 4),
-                   "sigma": round(sigma, 4), "method": "black_scholes"}
+                   "vega": round(vega, 4), "sigma": round(sigma, 4),
+                   "method": "black_scholes"}
 
-        if delta >= self._bs_delta_high:
-            return bullish_signal(key, "Delta质量", min((delta - self._bs_delta_high) / (1 - self._bs_delta_high), 1.0),
-                                  summary=f"BS Delta={delta:.3f}，强跟涨(高股性)",
+        # ── v1.7: Signal driven by Gamma (not Delta) ──
+        # Gamma thresholds: > 0.05 = high sensitivity, < 0.01 = low
+        gamma_high = 0.05
+        gamma_low = 0.01
+
+        if gamma >= gamma_high:
+            return bullish_signal(key, "Delta质量",
+                                  min((gamma - gamma_high) / gamma_high, 1.0),
+                                  summary=f"Gamma={gamma:.4f}(高)，Delta={delta:.3f}，期权敏感度高，适合主动波段交易",
                                   detail=detail)
-        if delta < self._bs_delta_low:
+        if gamma < gamma_low and gamma > 0:
             return neutral_signal(key, "Delta质量",
-                                  summary=f"BS Delta={delta:.3f}，偏债性",
+                                  summary=f"Gamma={gamma:.4f}(低)，Delta={delta:.3f}，期权反应迟钝，短期交易价值有限",
+                                  detail=detail)
+        if gamma <= 0:
+            return neutral_signal(key, "Delta质量",
+                                  summary=f"Gamma不可用，Delta={delta:.3f}",
                                   detail=detail)
         return neutral_signal(key, "Delta质量",
-                              summary=f"BS Delta={delta:.3f}，适度股性",
+                              summary=f"Gamma={gamma:.4f}，Delta={delta:.3f}，期权敏感度适中",
                               detail=detail)
 
     # -- batch runner ----------------------------------------------------
@@ -515,7 +543,7 @@ class VolatilityDetector:
         if weights is None:
             weights = {
                 "iv_percentile": 2, "hv_iv_divergence": 2,
-                "vol_expansion": 2, "bs_delta": 2,
+                "vol_expansion": 2, "bs_delta": 1,   # v1.7: 2→1 (Gamma-quality signal)
             }
         total_w = sum(weights.get(k, 0) for k in signals)
         if total_w == 0:

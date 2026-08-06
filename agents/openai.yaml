@@ -1,0 +1,73 @@
+interface:
+  display_name: "CB-Analyzer"
+  short_description: "Daily A-share convertible bond comprehensive analyzer: 21 detectors, Black-Scholes Greeks, IC backtest, LLM per-bond analysis."
+  default_prompt: "Use the cb-analyzer MCP server to run today's A-share convertible bond comprehensive analysis."
+
+tools:
+  - name: run_cb_analyzer
+    description: |
+      Run the full daily convertible bond analysis: double-low strategy, clause
+      events, stock linkage, Black-Scholes options pricing (Delta/Gamma/Vega),
+      HV/IV volatility signals, 4-dimension weighted scoring, and per-bond LLM analysis.
+    parameters:
+      date:
+        type: string
+        description: Target trading date (YYYYMMDD). Defaults to latest trading day.
+        required: false
+      top_n:
+        type: integer
+        description: Number of top bonds in report. Default 20.
+        required: false
+      use_llm:
+        type: boolean
+        description: Enable LLM per-bond analysis. Default true.
+        required: false
+      llm_top_n:
+        type: integer
+        description: Number of bonds for LLM deep analysis. Default 5.
+        required: false
+
+  - name: get_latest_report
+    description: |
+      Read and return the most recent CB daily report (Markdown or JSON).
+      Use this to check results without re-running the analysis.
+    parameters:
+      full_content:
+        type: boolean
+        description: Return full report content. Default true; false returns preview.
+        required: false
+
+  - name: check_trading_day
+    description: |
+      Check if a given date is an A-share trading day.
+      Use this before running analysis to avoid running on holidays.
+    parameters:
+      date:
+        type: string
+        description: Date in YYYYMMDD format. Defaults to latest trading day.
+        required: false
+
+  - name: search_bonds
+    description: |
+      Search for bonds by name or code in the latest report's ranked results.
+    parameters:
+      query:
+        type: string
+        description: Bond name or code to search for.
+        required: true
+      top_n:
+        type: integer
+        description: Max results to return. Default 10.
+        required: false
+
+# MCP server configuration
+mcp:
+  command: python
+  args: ["mcp_server.py"]
+  cwd: "${SKILL_ROOT}"
+  env:
+    ANTHROPIC_AUTH_TOKEN: "${ANTHROPIC_AUTH_TOKEN}"
+    ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL}"
+    ANTHROPIC_MODEL: "${ANTHROPIC_MODEL}"
+    DEFAULT_USERNAME: "${DEFAULT_USERNAME}"
+    DEFAULT_PASSWORD: "${DEFAULT_PASSWORD}"

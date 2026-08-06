@@ -1,0 +1,45 @@
+---
+description: Use the CB-Analyzer skill when the request matches its SKILL.md description.
+alwaysApply: false
+---
+
+# CB-Analyzer Skill
+
+When the user asks for work covered by this skill, use the local skill package.
+
+Preferred local project path:
+
+```text
+.cursor/skills/cb-analyzer
+```
+
+Workflow:
+
+1. Read `.cursor/skills/cb-analyzer/SKILL.md`.
+2. Load referenced files under `references/` only when the skill asks for them or the task needs those details.
+3. Run bundled scripts from the skill root when `SKILL.md` instructs it.
+4. Preserve documented API names, parameters, file paths, formulas, validation limits, and freshness notes.
+5. Do not invent data interfaces, credentials, factor definitions, or runtime behavior that is not supported by the skill files.
+
+## MCP Integration
+
+For LLM agents that support MCP (Claude Code, Cursor, etc.), add to MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "cb-analyzer": {
+      "command": "python",
+      "args": ["mcp_server.py"],
+      "cwd": "<SKILL_ROOT>",
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-xxx",
+        "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+        "ANTHROPIC_MODEL": "claude-sonnet-4-20250514"
+      }
+    }
+  }
+}
+```
+
+Available tools: `run_cb_analyzer`, `get_latest_report`, `check_trading_day`, `search_bonds`.

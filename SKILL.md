@@ -1,6 +1,7 @@
 ---
 name: skill-cb-analyzer
-description: A-share convertible bond daily comprehensive analyzer: double-low strategy,
+description: >-
+  A-share convertible bond daily comprehensive analyzer: double-low strategy,
   clause-driven events, stock linkage, risk monitoring, Black-Scholes options pricing,
   historical/implied volatility, IC + stratified backtesting. 21 signal detectors,
   4-dimension weighted scoring, LLM per-bond analysis, Markdown + JSON dual-format
@@ -70,8 +71,10 @@ quantSkills:
   status: dev
   validation_level: runnable
   maintainer_type: community
-  summary_zh: A股可转债每日综合分析：双低策略+条款事件+正股联动+Black-Scholes期权定价（Delta/Gamma/Vega）+HV/IV+IC分层回测+退市追踪。21信号检测器，四维加权评分，LLM逐券分析，Markdown/JSON双格式日报。v1.7修复Delta双重计数，bs_delta改为Gamma质量信号。
-  summary_en: Daily A-share CB analyzer: double-low + clause events + stock linkage + Black-Scholes Greeks + HV/IV + IC backtest + delisting tracking. 21 detectors, 4-dim weighted scoring, LLM per-bond analysis. v1.7 fixes Delta double-counting.
+  summary_zh: >-
+    A股可转债每日综合分析：双低策略+条款事件+正股联动+Black-Scholes期权定价（Delta/Gamma/Vega）+HV/IV+IC分层回测+退市追踪。21信号检测器，四维加权评分，LLM逐券分析，Markdown/JSON双格式日报。v1.7修复Delta双重计数，bs_delta改为Gamma质量信号。
+  summary_en: >-
+    Daily A-share CB analyzer: double-low + clause events + stock linkage + Black-Scholes Greeks + HV/IV + IC backtest + delisting tracking. 21 detectors, 4-dim weighted scoring, LLM per-bond analysis. v1.7 fixes Delta double-counting.
 ---
 
 # 可转债每日分析 (skill-cb-analyzer)

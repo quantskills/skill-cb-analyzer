@@ -41,7 +41,7 @@ output_formats:
   - markdown日报 (11节)
   - json结构化数据
 schedule: 每日收盘后 15:45 Asia/Shanghai（盘后固定价格交易 15:05-15:30 结束后执行）
-license: GPLv3
+license: GPL-3.0-only
 metadata:
   organization: QuantSkills
   organization_url: https://github.com/quantskills
@@ -437,3 +437,7 @@ skill-cb-analyzer/
 ## License
 
 GPLv3
+
+## Pandadata compatibility
+
+[Pandadata 1.0.6 compatibility](references/pandadata-compatibility.md) — exact SDK baseline, validation scope, and shared guidance for all supported agent runtimes.

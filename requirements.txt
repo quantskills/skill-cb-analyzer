@@ -1,4 +1,4 @@
-panda_data>=0.0.9
+panda_data==1.0.6
 pandas>=2.0.0
 numpy>=1.22,<2.0
 pyyaml>=6.0
